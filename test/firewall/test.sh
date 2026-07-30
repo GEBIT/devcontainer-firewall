@@ -25,5 +25,6 @@ check "firewall config exists" test -f /usr/local/bin/firewall-config.sh
 check "dockerNetworks default is true" grep -q 'INCLUDE_DOCKER_NETWORKS="true"' /usr/local/bin/firewall-config.sh
 check "verbose default is false" grep -q 'VERBOSE_MODE="false"' /usr/local/bin/firewall-config.sh
 check "githubIps default is false" grep -q 'INCLUDE_GITHUB_IPS="false"' /usr/local/bin/firewall-config.sh
+check "copilotIps default is false" grep -q 'INCLUDE_COPILOT_IPS="false"' /usr/local/bin/firewall-config.sh
 
 reportResults

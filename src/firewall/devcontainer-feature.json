@@ -35,6 +35,11 @@
             "default": false,
             "description": "GitHub IP ranges (fetched at runtime)"
         },
+        "copilotIps": {
+            "type": "boolean",
+            "default": false,
+            "description": "GitHub Copilot IP ranges from bundled metadata"
+        },
         "npmRegistry": {
             "type": "boolean",
             "default": false,

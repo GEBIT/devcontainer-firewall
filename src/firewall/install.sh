@@ -26,6 +26,7 @@ add_hosts_if_enabled() {
 HOSTS="${HOSTS:-""}"
 DOCKERNETWORKS="${DOCKERNETWORKS:-"true"}"
 GITHUBIPS="${GITHUBIPS:-"false"}"
+COPILOTIPS="${COPILOTIPS:-"false"}"
 
 CLAUDECODE="${CLAUDECODE:-"false"}"
 CODEX="${CODEX:-"false"}"
@@ -159,6 +160,7 @@ cat > /usr/local/bin/firewall-config.sh << EOF
 # Firewall configuration - generated at install time
 ALLOWED_HOSTS="${ALL_HOSTS}"
 INCLUDE_GITHUB_IPS="${GITHUBIPS}"
+INCLUDE_COPILOT_IPS="${COPILOTIPS}"
 INCLUDE_DOCKER_NETWORKS="${DOCKERNETWORKS}"
 INCLUDE_GOOGLE_CLOUD_IPS="${GOOGLECLOUDIPS}"
 INCLUDE_CLOUDFLARE_IPS="${CLOUDFLAREIPS}"
@@ -179,6 +181,11 @@ chmod 444 /usr/local/bin/firewall-config.sha256
 cp "$SCRIPT_DIR/scripts/init-firewall.sh" /usr/local/bin/init-firewall.sh
 chown root:root /usr/local/bin/init-firewall.sh
 chmod 755 /usr/local/bin/init-firewall.sh
+
+mkdir -p /usr/local/share/firewall
+cp "$SCRIPT_DIR/github_meta.json" /usr/local/share/firewall/github_meta.json
+chown root:root /usr/local/share/firewall/github_meta.json
+chmod 444 /usr/local/share/firewall/github_meta.json
 
 if [ "$VERBOSE" = "true" ]; then
     mkdir -p /var/log/ulog
@@ -214,6 +221,7 @@ chmod 0440 /etc/sudoers.d/firewall
 echo 'Firewall feature installed successfully!'
 echo "Configured hosts: ${ALL_HOSTS:-"(none)"}"
 echo "Include GitHub IPs: ${GITHUBIPS}"
+echo "Include Copilot IPs: ${COPILOTIPS}"
 echo "Include Docker networks: ${DOCKERNETWORKS}"
 echo "Include Google Cloud IPs: ${GOOGLECLOUDIPS}"
 echo "Include Cloudflare IPs: ${CLOUDFLAREIPS}"

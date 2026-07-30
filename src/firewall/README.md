@@ -21,6 +21,7 @@ Sets up an iptables-based firewall that restricts network access to only specifi
 | dnsPublic | Public DNS servers | boolean | false |
 | githubDomains | GitHub domains | boolean | false |
 | githubIps | GitHub IP ranges (fetched at runtime) | boolean | false |
+| copilotIps | GitHub Copilot IP ranges from bundled metadata | boolean | false |
 | npmRegistry | npm registry | boolean | false |
 | pypi | Python Package Index | boolean | false |
 | cratesIoRegistry | Rust crates.io registry | boolean | false |

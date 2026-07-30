@@ -1,6 +1,6 @@
 # Dev Container Features
 
-A collection of Dev Container Features published to `ghcr.io/w3cj/devcontainer-features`.
+Forked from `ghcr.io/w3cj/devcontainer-features`. This fork adds first-class support for running Copilot behind the firewall.
 
 ## Features
 
@@ -15,8 +15,8 @@ Add features to your `devcontainer.json`:
 ```json
 {
     "features": {
-        "ghcr.io/w3cj/devcontainer-features/firewall:latest": {
-            "githubIps": true,
+        "ghcr.io/GEBIT/devcontainer-firewall/firewall:latest": {
+            "copilotIps": true,
             "claudeCode": true
         }
     }
