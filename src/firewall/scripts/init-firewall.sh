@@ -43,6 +43,18 @@ add_to_ipset() {
     fi
 }
 
+add_ipv6_to_ipset() {
+    local entry="$1"
+    local source="$2"
+
+    if [[ "$entry" =~ ^[0-9A-Fa-f:]+(/[0-9]{1,3})?$ ]]; then
+        echo "Adding $source: $entry"
+        ipset add allowed-hosts-v6 "$entry" 2>/dev/null || true
+    else
+        echo "WARNING: Skipping invalid IPv6 entry from $source: $entry"
+    fi
+}
+
 # Fetch JSON from URL with retry and exponential backoff
 # Usage: fetch_json "url" "source_name"
 fetch_json() {
@@ -152,6 +164,10 @@ detect_docker_networks() {
     ip -o -f inet addr show | grep -v "127.0.0.1" | awk '{print $4}'
 }
 
+detect_docker_networks_v6() {
+    ip -o -6 addr show | awk '$4 !~ /^fe80:/ && $4 !~ /^::1/ {print $4}'
+}
+
 # Allow traffic to/from a network CIDR via iptables
 # Usage: allow_network "cidr" "description"
 allow_network() {
@@ -160,6 +176,14 @@ allow_network() {
     echo "Allowing $desc: $cidr"
     iptables -A INPUT -s "$cidr" -j ACCEPT
     iptables -A OUTPUT -d "$cidr" -j ACCEPT
+}
+
+allow_network_v6() {
+    local cidr="$1"
+    local desc="$2"
+    echo "Allowing $desc: $cidr"
+    ip6tables -A INPUT -s "$cidr" -j ACCEPT
+    ip6tables -A OUTPUT -d "$cidr" -j ACCEPT
 }
 
 #######################################
@@ -178,6 +202,17 @@ if [ "$INCLUDE_DOCKER_NETWORKS" = "true" ]; then
     fi
 fi
 
+if [ "$INCLUDE_COPILOT_IPS" = "true" ]; then
+    if ! command -v ip6tables >/dev/null 2>&1; then
+        echo "ERROR: ip6tables is required when Copilot IPs are enabled"
+        exit 1
+    fi
+    if [ "$INCLUDE_DOCKER_NETWORKS" = "true" ]; then
+        echo "Detecting IPv6 Docker networks..."
+        DOCKER_NETWORKS_V6=$(detect_docker_networks_v6)
+    fi
+fi
+
 # 2. Flush existing rules and delete existing ipsets
 iptables -F
 iptables -X
@@ -187,6 +222,13 @@ iptables -t mangle -F
 iptables -t mangle -X
 ipset destroy allowed-hosts 2>/dev/null || true
 
+if [ "$INCLUDE_COPILOT_IPS" = "true" ]; then
+    ip6tables -F
+    ip6tables -X
+    ip6tables -t mangle -F
+    ip6tables -t mangle -X
+    ipset destroy allowed-hosts-v6 2>/dev/null || true
+fi
 # 3. Restore Docker DNS resolution
 if [ -n "$DOCKER_DNS_RULES" ]; then
     echo "Restoring Docker DNS rules..."
@@ -205,8 +247,23 @@ iptables -A INPUT -p tcp --sport 22 -m state --state ESTABLISHED -j ACCEPT
 iptables -A INPUT -i lo -j ACCEPT
 iptables -A OUTPUT -o lo -j ACCEPT
 
+if [ "$INCLUDE_COPILOT_IPS" = "true" ]; then
+    ip6tables -A INPUT -p ipv6-icmp -j ACCEPT
+    ip6tables -A OUTPUT -p ipv6-icmp -j ACCEPT
+    ip6tables -A OUTPUT -p udp --dport 53 -j ACCEPT
+    ip6tables -A INPUT -p udp --sport 53 -j ACCEPT
+    ip6tables -A OUTPUT -p tcp --dport 22 -j ACCEPT
+    ip6tables -A INPUT -p tcp --sport 22 -m state --state ESTABLISHED -j ACCEPT
+    ip6tables -A INPUT -i lo -j ACCEPT
+    ip6tables -A OUTPUT -o lo -j ACCEPT
+fi
+
 # 5. Create ipset with CIDR support
 ipset create allowed-hosts hash:net
+
+if [ "$INCLUDE_COPILOT_IPS" = "true" ]; then
+    ipset create allowed-hosts-v6 hash:net family inet6
+fi
 
 # 6. Fetch and add dynamic IP ranges
 
@@ -217,6 +274,28 @@ if [ "$INCLUDE_GITHUB_IPS" = "true" ]; then
         exit 1
     fi
     process_ip_ranges "$gh_data" '(.web + .api + .git)[]' "GitHub" "true"
+fi
+
+if [ "$INCLUDE_COPILOT_IPS" = "true" ]; then
+    copilot_meta_file="/usr/local/share/firewall/github_meta.json"
+    if [ ! -r "$copilot_meta_file" ]; then
+        echo "ERROR: Bundled GitHub metadata is missing: $copilot_meta_file"
+        exit 1
+    fi
+    if ! jq -e '(.api | type == "array") and (.copilot | type == "array")' "$copilot_meta_file" >/dev/null; then
+        echo "ERROR: Bundled GitHub metadata is missing api or copilot ranges"
+        exit 1
+    fi
+    echo "Processing Copilot IPs from bundled GitHub metadata..."
+    copilot_ranges=$(jq -r '(.api + .copilot)[]' "$copilot_meta_file")
+    while read -r cidr; do
+        [ -z "$cidr" ] && continue
+        if [[ "$cidr" == *:* ]]; then
+            add_ipv6_to_ipset "$cidr" "Copilot"
+        else
+            add_to_ipset "$cidr" "Copilot"
+        fi
+    done <<< "$copilot_ranges"
 fi
 
 if [ "$INCLUDE_GOOGLE_CLOUD_IPS" = "true" ]; then
@@ -279,26 +358,67 @@ else
     allow_network "$HOST_NETWORK" "Host network"
 fi
 
+if [ "$INCLUDE_COPILOT_IPS" = "true" ]; then
+    if [ "$INCLUDE_DOCKER_NETWORKS" = "true" ] && [ -n "${DOCKER_NETWORKS_V6:-}" ]; then
+        echo "Allowing IPv6 Docker networks..."
+        while read -r network; do
+            [ -z "$network" ] && continue
+            allow_network_v6 "$network" "IPv6 Docker network"
+        done < <(echo "$DOCKER_NETWORKS_V6")
+    else
+        host_interface=$(ip -6 route show default | awk 'NR == 1 {print $5}')
+        if [ -n "$host_interface" ]; then
+            host_networks_v6=$(ip -o -6 addr show dev "$host_interface" scope global | awk '{print $4}')
+            while read -r network; do
+                [ -z "$network" ] && continue
+                allow_network_v6 "$network" "IPv6 host network"
+            done <<< "$host_networks_v6"
+        fi
+    fi
+fi
+
 # 10. Set restrictive default policies
 iptables -P INPUT DROP
 iptables -P FORWARD DROP
 iptables -P OUTPUT DROP
 
+if [ "$INCLUDE_COPILOT_IPS" = "true" ]; then
+    ip6tables -P INPUT DROP
+    ip6tables -P FORWARD DROP
+    ip6tables -P OUTPUT DROP
+fi
+
 # 11. Allow established connections
 iptables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
 iptables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
 
+if [ "$INCLUDE_COPILOT_IPS" = "true" ]; then
+    ip6tables -A INPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+    ip6tables -A OUTPUT -m state --state ESTABLISHED,RELATED -j ACCEPT
+fi
+
 # 12. Allow traffic to approved hosts
 iptables -A OUTPUT -m set --match-set allowed-hosts dst -j ACCEPT
+
+if [ "$INCLUDE_COPILOT_IPS" = "true" ]; then
+    ip6tables -A OUTPUT -m set --match-set allowed-hosts-v6 dst -j ACCEPT
+fi
 
 # 12.5. If verbose mode, add NFLOG rule before REJECT (uses userspace logging via ulogd2)
 if [ "$VERBOSE_MODE" = "true" ]; then
     echo "Enabling verbose firewall logging..."
     iptables -A OUTPUT -j NFLOG --nflog-prefix "FW-BLOCKED:" --nflog-group 1
+    if [ "$INCLUDE_COPILOT_IPS" = "true" ]; then
+        ip6tables -A OUTPUT -j NFLOG --nflog-prefix "FW-BLOCKED:" --nflog-group 1
+    fi
 fi
 
 # 13. Reject all other outbound traffic
 iptables -A OUTPUT -j REJECT --reject-with icmp-admin-prohibited
+
+if [ "$INCLUDE_COPILOT_IPS" = "true" ]; then
+    ip6tables -A OUTPUT -j REJECT --reject-with icmp6-adm-prohibited
+fi
 
 echo "Firewall configuration complete"
 

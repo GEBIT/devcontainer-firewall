@@ -53,6 +53,15 @@
             }
         }
     },
+    "test_copilot_ips": {
+        "image": "mcr.microsoft.com/devcontainers/base:debian",
+        "features": {
+            "firewall": {
+                "copilotIps": true,
+                "githubIps": false
+            }
+        }
+    },
     "test_cloudflare_ips": {
         "image": "mcr.microsoft.com/devcontainers/base:debian",
         "features": {
